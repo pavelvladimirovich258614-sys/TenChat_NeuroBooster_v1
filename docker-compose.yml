@@ -1,9 +1,15 @@
 version: '3.8'
 
+# ============================================
+# TenChat NeuroBooster Docker Compose v1.2.1
+# ============================================
+
 services:
   # FastAPI Backend
   api:
-    build: .
+    build: 
+      context: .
+      dockerfile: Dockerfile
     container_name: tenchat_api
     command: python -m app.main
     ports:
@@ -11,34 +17,71 @@ services:
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-      - ./.env:/app/.env
+      - ./.env:/app/.env:ro
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///./data/tenchat_booster.db
+      - PYTHONUNBUFFERED=1
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/"]
       interval: 30s
       timeout: 10s
       retries: 3
-      start_period: 10s
+      start_period: 15s
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+        reservations:
+          memory: 256M
 
   # Streamlit UI
   ui:
-    build: .
+    build:
+      context: .
+      dockerfile: Dockerfile
     container_name: tenchat_ui
-    command: streamlit run ui/streamlit_app.py --server.port=8501 --server.address=0.0.0.0
+    command: >
+      streamlit run ui/streamlit_app.py 
+      --server.port=8501 
+      --server.address=0.0.0.0
+      --server.headless=true
+      --browser.gatherUsageStats=false
     ports:
       - "8501:8501"
     volumes:
       - ./data:/app/data
       - ./logs:/app/logs
-      - ./.env:/app/.env
+      - ./.env:/app/.env:ro
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: unless-stopped
     environment:
       - API_URL=http://api:8000
+      - PYTHONUNBUFFERED=1
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "10m"
+        max-file: "3"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 128M
 
 networks:
   default:
     name: tenchat_network
+    driver: bridge
+
+volumes:
+  data:
+  logs:

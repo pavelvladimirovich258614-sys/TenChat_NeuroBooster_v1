@@ -1,16 +1,24 @@
 """
-Task Executor with human emulation and safety limits
+Task Executor with Enhanced Human Emulation and Safety Features
 """
 import asyncio
 import random
+import json
 from datetime import datetime, timedelta
-from typing import Dict, Optional, List
+from typing import Dict, Optional, List, Any, Tuple
 from loguru import logger
 from sqlalchemy import select, and_, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.database import Account, Action, Task, DailyStats
-from app.services.tenchat_client import TenChatClient
+from app.services.tenchat_client import (
+    TenChatClient, 
+    AuthExpiredError, 
+    CaptchaRequiredError, 
+    RateLimitError,
+    ProxyError,
+    APIError
+)
 from app.services.ai_generator import AIGenerator
 from app.utils.cookies_parser import CookiesParser
 from app.utils.proxy_handler import ProxyHandler
@@ -18,7 +26,7 @@ from config.settings import settings
 
 
 class TaskExecutor:
-    """Execute tasks with safety limits and human emulation"""
+    """Execute tasks with advanced human emulation and safety features"""
 
     def __init__(
         self,
@@ -34,10 +42,64 @@ class TaskExecutor:
         """
         self.db = db_session
         self.ai_generator = ai_generator
+        self._session_action_count = 0  # Track actions in current session
 
+    async def _check_activity_window(self) -> bool:
+        """Check if current time is within allowed activity window"""
+        current_hour = datetime.now().hour
+        if not settings.is_within_activity_window(current_hour):
+            logger.warning(f"Outside activity window ({settings.ACTIVITY_WINDOW_START}-{settings.ACTIVITY_WINDOW_END}h)")
+            return False
+        return True
+    
+    async def _human_delay(self, risky: bool = False, action_name: str = "action"):
+        """
+        Apply human-like delay with session breaks
+        
+        Args:
+            risky: Whether this is a risky action (longer delay)
+            action_name: Name of action for logging
+        """
+        # Check if we need a session break
+        self._session_action_count += 1
+        
+        if settings.should_take_session_break(self._session_action_count):
+            break_duration = settings.get_session_break_duration()
+            logger.info(f"Taking session break ({break_duration}s) after {self._session_action_count} actions")
+            await asyncio.sleep(break_duration)
+            self._session_action_count = 0
+        else:
+            # Normal delay
+            delay = settings.get_random_delay(risky=risky)
+            logger.debug(f"[{action_name}] Waiting {delay:.1f}s...")
+            await asyncio.sleep(delay)
+    
+    async def _simulate_reading(self, content_length: int = 100):
+        """Simulate reading content before acting"""
+        # Longer content = longer read time
+        base_delay = settings.get_read_delay()
+        length_factor = min(content_length / 500, 2.0)  # Cap at 2x
+        delay = base_delay * (1 + length_factor * 0.5)
+        await asyncio.sleep(delay)
+    
+    async def _maybe_noise_action(self, client: TenChatClient):
+        """Maybe perform a noise action for human-like behavior"""
+        if settings.ENABLE_NOISE_ACTIONS and random.random() < settings.NOISE_ACTION_PROBABILITY:
+            noise_actions = [
+                lambda: client.scroll_feed(),
+                lambda: client.get_trending_posts(limit=3),
+            ]
+            action = random.choice(noise_actions)
+            try:
+                await action()
+                logger.debug("Performed noise action")
+                await asyncio.sleep(random.uniform(2, 5))
+            except:
+                pass  # Noise actions failures are ok
+    
     async def execute_task(self, task: Task) -> bool:
         """
-        Execute a task
+        Execute a task with enhanced error handling
 
         Args:
             task: Task to execute
@@ -46,6 +108,16 @@ class TaskExecutor:
             True if successful, False otherwise
         """
         logger.info(f"Executing task {task.id}: {task.task_type}")
+        
+        # Reset session counter for new task
+        self._session_action_count = 0
+
+        # Check activity window
+        if not await self._check_activity_window():
+            task.status = "pending"
+            task.error_message = "Outside activity window, will retry later"
+            await self.db.commit()
+            return False
 
         # Update task status
         task.status = "running"
@@ -102,16 +174,48 @@ class TaskExecutor:
             await self.db.commit()
             return success
 
+        except AuthExpiredError as e:
+            logger.error(f"Task {task.id} failed: Authentication expired")
+            task.status = "failed"
+            task.error_message = "🔒 Cookies expired - требуется повторная авторизация"
+            # Update account status
+            account.status = "cookies_expired"
+            await self.db.commit()
+            return False
+        
+        except CaptchaRequiredError as e:
+            logger.error(f"Task {task.id} failed: Captcha required")
+            task.status = "failed"
+            task.error_message = "⚠️ Требуется капча - аккаунт временно заблокирован"
+            account.status = "captcha"
+            await self.db.commit()
+            return False
+        
+        except RateLimitError as e:
+            logger.warning(f"Task {task.id}: Rate limited, will retry")
+            task.status = "pending"
+            task.error_message = f"Rate limit - повтор через {e.retry_after}s"
+            await self.db.commit()
+            return False
+        
+        except ProxyError as e:
+            logger.error(f"Task {task.id} failed: Proxy error - {e}")
+            task.status = "failed"
+            task.error_message = f"🌐 Ошибка прокси: {str(e)[:100]}"
+            account.status = "proxy_error"
+            await self.db.commit()
+            return False
+
         except Exception as e:
             logger.error(f"Task {task.id} failed: {e}")
             task.status = "failed"
-            task.error_message = str(e)
+            task.error_message = str(e)[:500]
             await self.db.commit()
             return False
 
     async def _execute_warmup(self, account: Account, task: Task) -> bool:
         """
-        Execute warmup task (liking feed)
+        Execute warmup task (liking feed) with human-like behavior
 
         Args:
             account: Account to use
@@ -136,24 +240,42 @@ class TaskExecutor:
         try:
             # Check auth
             if not await client.check_auth():
-                account.status = "cookies_expired"
-                await self.db.commit()
-                raise ValueError("Authentication failed - cookies expired")
+                raise AuthExpiredError()
 
             # Get feed
             posts = await client.get_feed(feed_type=feed_type, limit=num_likes * 2)
             if not posts:
                 raise ValueError("Failed to fetch feed")
 
-            # Like posts with delays
+            # Randomize order if enabled
+            if settings.RANDOMIZE_ACTION_ORDER:
+                random.shuffle(posts)
+
+            # Like posts with human-like delays
             liked_count = 0
-            for i, post in enumerate(posts[:num_likes]):
+            posts_to_process = posts[:num_likes]
+            
+            for i, post in enumerate(posts_to_process):
                 post_id = post.get("id") or post.get("post_id")
+                post_content = post.get("text") or post.get("content", "")
+                
                 if not post_id:
                     continue
 
+                # Simulate reading the post
+                await self._simulate_reading(len(post_content))
+                
+                # Maybe do a noise action
+                await self._maybe_noise_action(client)
+
                 # Like post
-                success = await client.like_post(str(post_id))
+                try:
+                    success = await client.like_post(str(post_id))
+                except (AuthExpiredError, CaptchaRequiredError):
+                    raise
+                except Exception as e:
+                    logger.warning(f"Failed to like post {post_id}: {e}")
+                    success = False
 
                 # Log action
                 action = Action(
@@ -167,19 +289,15 @@ class TaskExecutor:
                 if success:
                     liked_count += 1
                     await self._increment_daily_stats(account.id, "like")
+                    logger.info(f"[{account.name}] ✓ Liked post {post_id}")
 
-                    # Update task progress
-                    task.progress = int((i + 1) / num_likes * 100)
-                    await self.db.commit()
+                # Update task progress
+                task.progress = int((i + 1) / len(posts_to_process) * 100)
+                await self.db.commit()
 
-                    # Human-like delay
-                    if i < num_likes - 1:  # No delay after last like
-                        delay = random.randint(
-                            settings.MIN_ACTION_DELAY,
-                            settings.MAX_ACTION_DELAY
-                        )
-                        logger.info(f"[{account.name}] Liked post {post_id}. Pausing {delay} seconds...")
-                        await asyncio.sleep(delay)
+                # Human-like delay (no delay after last action)
+                if i < len(posts_to_process) - 1:
+                    await self._human_delay(risky=False, action_name=f"like_{i+1}")
 
             task.result = f"Liked {liked_count}/{num_likes} posts"
             logger.info(f"Warmup completed: {liked_count}/{num_likes} likes")
@@ -191,7 +309,7 @@ class TaskExecutor:
 
     async def _execute_ai_post(self, account: Account, task: Task) -> bool:
         """
-        Execute AI post task
+        Execute AI post task with human-like timing
 
         Args:
             account: Account to use
@@ -226,9 +344,10 @@ class TaskExecutor:
             raise ValueError("Daily post limit exceeded")
 
         # Generate article with mood
-        task.progress = 20
+        task.progress = 10
         await self.db.commit()
-
+        
+        logger.info("Generating article with AI...")
         article = await self.ai_generator.generate_article(
             topic=topic,
             style=style,
@@ -237,7 +356,9 @@ class TaskExecutor:
         if not article:
             raise ValueError("Failed to generate article")
 
-        logger.info(f"Generated article ({mood} mood): {article['title']}")
+        logger.info(f"Generated article ({mood} mood): {article['title'][:50]}...")
+        task.progress = 40
+        await self.db.commit()
 
         # Create TenChat client
         client = await self._create_client(account)
@@ -245,12 +366,15 @@ class TaskExecutor:
         try:
             # Check auth
             if not await client.check_auth():
-                account.status = "cookies_expired"
-                await self.db.commit()
-                raise ValueError("Authentication failed - cookies expired")
+                raise AuthExpiredError()
 
             task.progress = 50
             await self.db.commit()
+            
+            # Simulate "writing" time - humans don't post instantly
+            writing_delay = random.uniform(10, 30)
+            logger.debug(f"Simulating writing time ({writing_delay:.0f}s)...")
+            await asyncio.sleep(writing_delay)
 
             # Post article
             post_id = await client.post_article(
@@ -273,7 +397,7 @@ class TaskExecutor:
             await self._increment_daily_stats(account.id, "post")
 
             task.progress = 100
-            task.result = f"Posted article ({mood}): {post_id}"
+            task.result = f"✅ Опубликовано ({mood}): {article['title'][:50]}..."
             await self.db.commit()
 
             logger.info(f"AI post completed ({mood} mood): {post_id}")
@@ -955,8 +1079,7 @@ class TaskExecutor:
                 # Small delay to avoid rate limiting
                 await asyncio.sleep(random.uniform(1, 3))
 
-            # Save to CSV or JSON (simplified - just store in task result)
-            import json
+            # Save result (json already imported at top)
             task.result = f"Parsed {len(user_data)} users: {json.dumps(user_data, ensure_ascii=False)[:500]}"
             logger.info(f"Parse users completed: {len(user_data)} users parsed")
 

@@ -1,7 +1,9 @@
 """
-FastAPI Backend for TenChat NeuroBooster
+FastAPI Backend for TenChat NeuroBooster with Enhanced Reliability
 """
 import asyncio
+import signal
+import sys
 from contextlib import asynccontextmanager
 from fastapi import FastAPI, Depends, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
@@ -16,11 +18,26 @@ from app.utils.db_manager import get_db_manager, get_db
 from app.utils.cookies_parser import CookiesParser
 from app.utils.proxy_handler import ProxyHandler
 from app.utils.user_agent_generator import UserAgentGenerator
-from app.services.tenchat_client import TenChatClient
+from app.services.tenchat_client import TenChatClient, AuthExpiredError, CaptchaRequiredError, ProxyError
 from app.services.ai_generator import AIGenerator
 from app.services.task_executor import TaskExecutor
 from config.settings import settings
 from loguru import logger
+
+# Configure loguru for better output
+logger.remove()
+logger.add(
+    sys.stderr,
+    format="<green>{time:YYYY-MM-DD HH:mm:ss}</green> | <level>{level: <8}</level> | <cyan>{name}</cyan>:<cyan>{function}</cyan>:<cyan>{line}</cyan> - <level>{message}</level>",
+    level="INFO"
+)
+logger.add(
+    "logs/tenchat_booster.log",
+    rotation="10 MB",
+    retention="7 days",
+    compression="zip",
+    level="DEBUG"
+)
 
 
 # Pydantic models
@@ -75,19 +92,19 @@ class ActionResponse(BaseModel):
         from_attributes = True
 
 
-# Global task queue
+# Global task queue and workers
 task_queue: asyncio.Queue = None
-task_worker_running = False
+task_workers_running = False
+task_worker_tasks: List[asyncio.Task] = []
 
 
-async def task_worker():
+async def task_worker(worker_id: int):
     """Background worker to process tasks"""
-    global task_worker_running
-    task_worker_running = True
+    global task_workers_running
 
-    logger.info("Task worker started")
+    logger.info(f"Task worker #{worker_id} started")
 
-    # Create AI generator
+    # Create AI generator for this worker
     ai_generator = AIGenerator(
         base_url=settings.AI_BASE_URL,
         api_key=settings.AI_API_KEY,
@@ -98,66 +115,114 @@ async def task_worker():
 
     db_manager = get_db_manager()
 
-    while task_worker_running:
+    while task_workers_running:
         try:
-            # Get task from queue
-            task_id = await asyncio.wait_for(task_queue.get(), timeout=1.0)
+            # Get task from queue with timeout
+            task_id = await asyncio.wait_for(task_queue.get(), timeout=2.0)
+            
+            logger.info(f"Worker #{worker_id} processing task {task_id}")
 
-            # Process task
-            async for db in db_manager.get_session():
-                # Get task
-                result = await db.execute(
-                    select(Task).where(Task.id == task_id)
-                )
-                task = result.scalar_one_or_none()
+            # Process task - get single session
+            db = None
+            try:
+                async for session in db_manager.get_session():
+                    db = session
+                    break
+                
+                if db:
+                    # Get task
+                    result = await db.execute(
+                        select(Task).where(Task.id == task_id)
+                    )
+                    task = result.scalar_one_or_none()
 
-                if task:
-                    executor = TaskExecutor(db, ai_generator)
-                    await executor.execute_task(task)
-
+                    if task:
+                        executor = TaskExecutor(db, ai_generator)
+                        success = await executor.execute_task(task)
+                        logger.info(f"Worker #{worker_id} finished task {task_id}: {'SUCCESS' if success else 'FAILED'}")
+                    else:
+                        logger.warning(f"Task {task_id} not found in database")
+            
+            except Exception as e:
+                logger.error(f"Worker #{worker_id} error processing task {task_id}: {e}")
+            finally:
                 task_queue.task_done()
-                break
 
         except asyncio.TimeoutError:
             continue
+        except asyncio.CancelledError:
+            logger.info(f"Task worker #{worker_id} cancelled")
+            break
         except Exception as e:
-            logger.error(f"Task worker error: {e}")
+            logger.error(f"Task worker #{worker_id} error: {e}")
             await asyncio.sleep(1)
 
-    logger.info("Task worker stopped")
+    logger.info(f"Task worker #{worker_id} stopped")
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Application lifespan events"""
-    global task_queue
+    """Application lifespan events with graceful shutdown"""
+    global task_queue, task_workers_running, task_worker_tasks
 
     # Startup
-    logger.info("Starting TenChat NeuroBooster API")
+    logger.info("=" * 50)
+    logger.info("Starting TenChat NeuroBooster API v1.2.1")
+    logger.info("=" * 50)
 
     # Initialize database
     db_manager = get_db_manager()
     await db_manager.init_db()
-    logger.info("Database initialized")
+    logger.info("✓ Database initialized")
 
-    # Create task queue
-    task_queue = asyncio.Queue()
+    # Create task queue with max size
+    task_queue = asyncio.Queue(maxsize=settings.TASK_QUEUE_MAX_SIZE)
+    logger.info(f"✓ Task queue created (max size: {settings.TASK_QUEUE_MAX_SIZE})")
 
-    # Start task worker
-    worker_task = asyncio.create_task(task_worker())
+    # Start multiple task workers
+    task_workers_running = True
+    num_workers = settings.NUM_TASK_WORKERS
+    
+    for i in range(num_workers):
+        worker_task = asyncio.create_task(task_worker(i + 1))
+        task_worker_tasks.append(worker_task)
+    
+    logger.info(f"✓ Started {num_workers} task workers")
+    logger.info("=" * 50)
+    logger.info("API ready to accept requests")
+    logger.info("=" * 50)
 
     yield
 
     # Shutdown
-    logger.info("Shutting down TenChat NeuroBooster API")
+    logger.info("=" * 50)
+    logger.info("Shutting down TenChat NeuroBooster API...")
 
-    # Stop task worker
-    global task_worker_running
-    task_worker_running = False
-    await worker_task
+    # Signal workers to stop
+    task_workers_running = False
+    
+    # Wait for workers to finish current tasks (with timeout)
+    logger.info("Waiting for task workers to finish...")
+    try:
+        # Cancel all workers
+        for worker_task in task_worker_tasks:
+            worker_task.cancel()
+        
+        # Wait for all to complete with timeout
+        await asyncio.wait_for(
+            asyncio.gather(*task_worker_tasks, return_exceptions=True),
+            timeout=30.0
+        )
+        logger.info("✓ All task workers stopped")
+    except asyncio.TimeoutError:
+        logger.warning("⚠ Some workers did not stop in time")
 
     # Close database
     await db_manager.close()
+    logger.info("✓ Database connection closed")
+    logger.info("=" * 50)
+    logger.info("Shutdown complete")
+    logger.info("=" * 50)
 
 
 # Create FastAPI app
