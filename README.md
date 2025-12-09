@@ -489,6 +489,6 @@ A: Рекомендуется запускать на VPS сервере для 
 
 ---
 
-**Версия:** 1.0.0
-**Дата:** 2025
-**Стек:** Python 3.11+ | FastAPI | Streamlit | SQLite | Docker
+**Версия:** 1.1.0
+**Дата:** 2025-12-09
+**Стек:** Python 3.11+ | FastAPI | Streamlit | SQLite | Docker | httpx-socks
