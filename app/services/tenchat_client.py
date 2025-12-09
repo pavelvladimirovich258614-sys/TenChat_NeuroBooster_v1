@@ -342,6 +342,443 @@ class TenChatClient:
             logger.error(f"Upload image exception: {e}")
             return None
 
+    async def comment_on_post(
+        self,
+        post_id: str,
+        comment_text: str
+    ) -> bool:
+        """
+        Comment on a post
+
+        Args:
+            post_id: Post ID to comment on
+            comment_text: Comment text
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            response = await self.client.post(
+                f"{self.base_url}/api/v1/posts/{post_id}/comments",
+                headers=self._get_headers({"Content-Type": "application/json"}),
+                cookies=self.cookies,
+                json={"text": comment_text}
+            )
+
+            if response.status_code in [200, 201]:
+                logger.info(f"Commented on post {post_id}")
+                return True
+            elif response.status_code == 401:
+                logger.error(f"Comment on post {post_id}: UNAUTHORIZED")
+                return False
+            elif response.status_code == 403:
+                logger.error(f"Comment on post {post_id}: FORBIDDEN")
+                return False
+            else:
+                logger.error(f"Comment on post {post_id} failed: {response.status_code}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Comment on post {post_id} exception: {e}")
+            return False
+
+    async def search_users(
+        self,
+        query: str,
+        limit: int = 20
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Search for users
+
+        Args:
+            query: Search query (name, position, company)
+            limit: Number of results
+
+        Returns:
+            List of users or None if error
+        """
+        try:
+            params = {
+                "q": query,
+                "limit": limit
+            }
+
+            response = await self.client.get(
+                f"{self.base_url}/api/v1/users/search",
+                headers=self._get_headers(),
+                cookies=self.cookies,
+                params=params
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                users = data.get("users", []) if isinstance(data, dict) else data
+                logger.info(f"Found {len(users)} users for query '{query}'")
+                return users
+            elif response.status_code == 401:
+                logger.error("Search users: UNAUTHORIZED")
+                return None
+            else:
+                logger.error(f"Search users failed: {response.status_code}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Search users exception: {e}")
+            return None
+
+    async def send_message(
+        self,
+        user_id: str,
+        message_text: str
+    ) -> bool:
+        """
+        Send direct message to user
+
+        Args:
+            user_id: User ID to send message to
+            message_text: Message text
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            response = await self.client.post(
+                f"{self.base_url}/api/v1/messages",
+                headers=self._get_headers({"Content-Type": "application/json"}),
+                cookies=self.cookies,
+                json={
+                    "recipient_id": user_id,
+                    "text": message_text
+                }
+            )
+
+            if response.status_code in [200, 201]:
+                logger.info(f"Sent message to user {user_id}")
+                return True
+            elif response.status_code == 401:
+                logger.error(f"Send message to {user_id}: UNAUTHORIZED")
+                return False
+            elif response.status_code == 403:
+                logger.error(f"Send message to {user_id}: FORBIDDEN")
+                return False
+            else:
+                logger.error(f"Send message to {user_id} failed: {response.status_code}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Send message to {user_id} exception: {e}")
+            return False
+
+    async def get_inbox(
+        self,
+        limit: int = 20,
+        unread_only: bool = False
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get inbox messages
+
+        Args:
+            limit: Number of messages to fetch
+            unread_only: Fetch only unread messages
+
+        Returns:
+            List of messages or None if error
+        """
+        try:
+            params = {
+                "limit": limit,
+                "unread": unread_only
+            }
+
+            response = await self.client.get(
+                f"{self.base_url}/api/v1/messages/inbox",
+                headers=self._get_headers(),
+                cookies=self.cookies,
+                params=params
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                messages = data.get("messages", []) if isinstance(data, dict) else data
+                logger.info(f"Fetched {len(messages)} inbox messages")
+                return messages
+            elif response.status_code == 401:
+                logger.error("Get inbox: UNAUTHORIZED")
+                return None
+            else:
+                logger.error(f"Get inbox failed: {response.status_code}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Get inbox exception: {e}")
+            return None
+
+    async def invite_to_alliance(
+        self,
+        alliance_id: str,
+        user_id: str
+    ) -> bool:
+        """
+        Invite user to alliance
+
+        Args:
+            alliance_id: Alliance ID
+            user_id: User ID to invite
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            response = await self.client.post(
+                f"{self.base_url}/api/v1/alliances/{alliance_id}/invite",
+                headers=self._get_headers({"Content-Type": "application/json"}),
+                cookies=self.cookies,
+                json={"user_id": user_id}
+            )
+
+            if response.status_code in [200, 201]:
+                logger.info(f"Invited user {user_id} to alliance {alliance_id}")
+                return True
+            elif response.status_code == 401:
+                logger.error(f"Invite to alliance: UNAUTHORIZED")
+                return False
+            elif response.status_code == 403:
+                logger.error(f"Invite to alliance: FORBIDDEN")
+                return False
+            else:
+                logger.error(f"Invite to alliance failed: {response.status_code}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Invite to alliance exception: {e}")
+            return False
+
+    async def get_user_profile(
+        self,
+        user_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get user profile
+
+        Args:
+            user_id: User ID
+
+        Returns:
+            User profile data or None if error
+        """
+        try:
+            response = await self.client.get(
+                f"{self.base_url}/api/v1/users/{user_id}",
+                headers=self._get_headers(),
+                cookies=self.cookies
+            )
+
+            if response.status_code == 200:
+                profile = response.json()
+                logger.info(f"Fetched profile for user {user_id}")
+                return profile
+            elif response.status_code == 401:
+                logger.error("Get user profile: UNAUTHORIZED")
+                return None
+            else:
+                logger.error(f"Get user profile failed: {response.status_code}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Get user profile exception: {e}")
+            return None
+
+    async def get_my_followers(
+        self,
+        limit: int = 50
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get my followers
+
+        Args:
+            limit: Number of followers to fetch
+
+        Returns:
+            List of followers or None if error
+        """
+        try:
+            params = {"limit": limit}
+
+            response = await self.client.get(
+                f"{self.base_url}/api/v1/profile/me/followers",
+                headers=self._get_headers(),
+                cookies=self.cookies,
+                params=params
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                followers = data.get("followers", []) if isinstance(data, dict) else data
+                logger.info(f"Fetched {len(followers)} followers")
+                return followers
+            elif response.status_code == 401:
+                logger.error("Get followers: UNAUTHORIZED")
+                return None
+            else:
+                logger.error(f"Get followers failed: {response.status_code}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Get followers exception: {e}")
+            return None
+
+    async def unfollow_user(
+        self,
+        user_id: str
+    ) -> bool:
+        """
+        Unfollow a user
+
+        Args:
+            user_id: User ID to unfollow
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            response = await self.client.delete(
+                f"{self.base_url}/api/v1/users/{user_id}/follow",
+                headers=self._get_headers(),
+                cookies=self.cookies
+            )
+
+            if response.status_code in [200, 204]:
+                logger.info(f"Unfollowed user {user_id}")
+                return True
+            elif response.status_code == 401:
+                logger.error(f"Unfollow user {user_id}: UNAUTHORIZED")
+                return False
+            else:
+                logger.error(f"Unfollow user {user_id} failed: {response.status_code}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Unfollow user {user_id} exception: {e}")
+            return False
+
+    async def get_post_by_id(
+        self,
+        post_id: str
+    ) -> Optional[Dict[str, Any]]:
+        """
+        Get post by ID
+
+        Args:
+            post_id: Post ID
+
+        Returns:
+            Post data or None if error
+        """
+        try:
+            response = await self.client.get(
+                f"{self.base_url}/api/v1/posts/{post_id}",
+                headers=self._get_headers(),
+                cookies=self.cookies
+            )
+
+            if response.status_code == 200:
+                post = response.json()
+                logger.info(f"Fetched post {post_id}")
+                return post
+            elif response.status_code == 401:
+                logger.error("Get post: UNAUTHORIZED")
+                return None
+            else:
+                logger.error(f"Get post failed: {response.status_code}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Get post exception: {e}")
+            return None
+
+    async def get_trending_posts(
+        self,
+        limit: int = 20
+    ) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get trending posts
+
+        Args:
+            limit: Number of posts to fetch
+
+        Returns:
+            List of trending posts or None if error
+        """
+        try:
+            params = {"limit": limit}
+
+            response = await self.client.get(
+                f"{self.base_url}/api/v1/posts/trending",
+                headers=self._get_headers(),
+                cookies=self.cookies,
+                params=params
+            )
+
+            if response.status_code == 200:
+                data = response.json()
+                posts = data.get("posts", []) if isinstance(data, dict) else data
+                logger.info(f"Fetched {len(posts)} trending posts")
+                return posts
+            elif response.status_code == 401:
+                logger.error("Get trending posts: UNAUTHORIZED")
+                return None
+            else:
+                logger.error(f"Get trending posts failed: {response.status_code}")
+                return None
+
+        except Exception as e:
+            logger.error(f"Get trending posts exception: {e}")
+            return None
+
+    async def send_connection_request(
+        self,
+        user_id: str,
+        message: Optional[str] = None
+    ) -> bool:
+        """
+        Send connection request to user
+
+        Args:
+            user_id: User ID to connect with
+            message: Optional message to include
+
+        Returns:
+            True if successful, False otherwise
+        """
+        try:
+            payload = {"user_id": user_id}
+            if message:
+                payload["message"] = message
+
+            response = await self.client.post(
+                f"{self.base_url}/api/v1/connections/request",
+                headers=self._get_headers({"Content-Type": "application/json"}),
+                cookies=self.cookies,
+                json=payload
+            )
+
+            if response.status_code in [200, 201]:
+                logger.info(f"Sent connection request to user {user_id}")
+                return True
+            elif response.status_code == 401:
+                logger.error(f"Connection request: UNAUTHORIZED")
+                return False
+            elif response.status_code == 403:
+                logger.error(f"Connection request: FORBIDDEN")
+                return False
+            else:
+                logger.error(f"Connection request failed: {response.status_code}")
+                return False
+
+        except Exception as e:
+            logger.error(f"Connection request exception: {e}")
+            return False
+
     async def close(self):
         """Close HTTP client"""
         await self.client.aclose()

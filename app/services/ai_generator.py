@@ -233,3 +233,162 @@ HASHTAGS:
         except Exception as e:
             logger.error(f"Analyze topic failed: {e}")
             return None
+
+    async def generate_auto_reply(
+        self,
+        incoming_message: str,
+        context: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Generate automatic reply to incoming message
+
+        Args:
+            incoming_message: Incoming message text
+            context: Optional context (user profile, previous messages)
+
+        Returns:
+            Generated reply or None if error
+        """
+        try:
+            system_prompt = """Ты - виртуальный помощник в деловой социальной сети TenChat.
+Твоя задача - отвечать на входящие сообщения вежливо, профессионально и по существу.
+
+Требования:
+- Язык: русский
+- Стиль: деловой, но дружелюбный
+- Длина: 2-4 предложения
+- Если сообщение содержит вопрос - дай полезный ответ
+- Если это приветствие - поприветствуй в ответ
+- Если это коммерческое предложение - вежливо укажи на способ связи или отклони
+"""
+
+            user_prompt = f"Входящее сообщение: {incoming_message}"
+            if context:
+                user_prompt += f"\n\nКонтекст: {context}"
+
+            response = await self.client.chat.completions.create(
+                model=self.model_comments,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=200
+            )
+
+            reply = response.choices[0].message.content.strip()
+            logger.info(f"Generated auto-reply: {reply[:50]}...")
+            return reply
+
+        except Exception as e:
+            logger.error(f"Generate auto-reply failed: {e}")
+            return None
+
+    async def generate_welcome_message(
+        self,
+        recipient_name: Optional[str] = None,
+        recipient_position: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Generate welcome message for new follower
+
+        Args:
+            recipient_name: Recipient's name
+            recipient_position: Recipient's position/role
+
+        Returns:
+            Generated welcome message or None if error
+        """
+        try:
+            system_prompt = """Ты - эксперт в создании приветственных сообщений для деловых контактов.
+Твоя задача - написать короткое, дружелюбное приветствие для нового подписчика.
+
+Требования:
+- Язык: русский
+- Стиль: дружелюбный, но профессиональный
+- Длина: 2-3 предложения
+- Поблагодари за подписку
+- Предложи сотрудничество или обмен опытом
+- Не используй шаблонные фразы
+"""
+
+            user_prompt = "Создай приветственное сообщение для нового подписчика."
+            if recipient_name:
+                user_prompt += f"\nИмя: {recipient_name}"
+            if recipient_position:
+                user_prompt += f"\nДолжность: {recipient_position}"
+
+            response = await self.client.chat.completions.create(
+                model=self.model_comments,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.8,
+                max_tokens=150
+            )
+
+            message = response.choices[0].message.content.strip()
+            logger.info(f"Generated welcome message: {message[:50]}...")
+            return message
+
+        except Exception as e:
+            logger.error(f"Generate welcome message failed: {e}")
+            return None
+
+    async def generate_dm_message(
+        self,
+        purpose: str,
+        recipient_name: Optional[str] = None,
+        recipient_position: Optional[str] = None
+    ) -> Optional[str]:
+        """
+        Generate direct message for outreach
+
+        Args:
+            purpose: Purpose of the message (e.g., "networking", "job offer", "partnership")
+            recipient_name: Recipient's name
+            recipient_position: Recipient's position/role
+
+        Returns:
+            Generated message or None if error
+        """
+        try:
+            system_prompt = f"""Ты - эксперт в создании персонализированных деловых сообщений.
+Твоя задача - написать эффективное сообщение для установления деловых контактов.
+
+Цель сообщения: {purpose}
+
+Требования:
+- Язык: русский
+- Стиль: профессиональный, персонализированный
+- Длина: 3-5 предложений
+- Представься кратко
+- Объясни причину обращения
+- Предложи конкретное действие (встреча, звонок, обмен контактами)
+- Избегай спама и навязчивости
+"""
+
+            user_prompt = f"Создай сообщение с целью: {purpose}"
+            if recipient_name:
+                user_prompt += f"\nИмя получателя: {recipient_name}"
+            if recipient_position:
+                user_prompt += f"\nДолжность: {recipient_position}"
+
+            response = await self.client.chat.completions.create(
+                model=self.model_comments,
+                messages=[
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt}
+                ],
+                temperature=0.7,
+                max_tokens=250
+            )
+
+            message = response.choices[0].message.content.strip()
+            logger.info(f"Generated DM: {message[:50]}...")
+            return message
+
+        except Exception as e:
+            logger.error(f"Generate DM failed: {e}")
+            return None

@@ -71,6 +71,22 @@ class TaskExecutor:
                 success = await self._execute_warmup(account, task)
             elif task.task_type == "ai_post":
                 success = await self._execute_ai_post(account, task)
+            elif task.task_type == "mass_follow":
+                success = await self._execute_mass_follow(account, task)
+            elif task.task_type == "ai_comments":
+                success = await self._execute_ai_comments(account, task)
+            elif task.task_type == "connections":
+                success = await self._execute_connections(account, task)
+            elif task.task_type == "dm_followers":
+                success = await self._execute_dm_followers(account, task)
+            elif task.task_type == "dm_cold":
+                success = await self._execute_dm_cold(account, task)
+            elif task.task_type == "alliance_invites":
+                success = await self._execute_alliance_invites(account, task)
+            elif task.task_type == "parse_users":
+                success = await self._execute_parse_users(account, task)
+            elif task.task_type == "auto_reply":
+                success = await self._execute_auto_reply(account, task)
             else:
                 raise ValueError(f"Unknown task type: {task.task_type}")
 
@@ -367,3 +383,647 @@ class TaskExecutor:
             stats.comments_count += 1
 
         await self.db.commit()
+
+    async def _execute_mass_follow(self, account: Account, task: Task) -> bool:
+        """
+        Execute mass follow task
+
+        Args:
+            account: Account to use
+            task: Task with parameters
+
+        Returns:
+            True if successful
+        """
+        params = task.parameters or {}
+        search_query = params.get("search_query", "")
+        num_follows = params.get("num_follows", 10)
+
+        logger.info(f"Mass follow task: {num_follows} follows for query '{search_query}'")
+
+        # Check daily limits
+        if not await self._check_daily_limit(account.id, "follow", num_follows):
+            raise ValueError("Daily follow limit exceeded")
+
+        # Create TenChat client
+        client = await self._create_client(account)
+
+        try:
+            # Check auth
+            if not await client.check_auth():
+                account.status = "cookies_expired"
+                await self.db.commit()
+                raise ValueError("Authentication failed - cookies expired")
+
+            # Search users
+            users = await client.search_users(search_query, limit=num_follows * 2)
+            if not users:
+                raise ValueError("Failed to find users")
+
+            # Follow users with delays
+            followed_count = 0
+            for i, user in enumerate(users[:num_follows]):
+                user_id = user.get("id") or user.get("user_id")
+                if not user_id:
+                    continue
+
+                # Follow user
+                success = await client.follow_user(str(user_id))
+
+                # Log action
+                action = Action(
+                    account_id=account.id,
+                    action_type="follow",
+                    target_id=str(user_id),
+                    success=success
+                )
+                self.db.add(action)
+
+                if success:
+                    followed_count += 1
+                    await self._increment_daily_stats(account.id, "follow")
+
+                    # Update task progress
+                    task.progress = int((i + 1) / num_follows * 100)
+                    await self.db.commit()
+
+                    # Human-like delay
+                    if i < num_follows - 1:
+                        delay = random.randint(
+                            settings.MIN_ACTION_DELAY,
+                            settings.MAX_ACTION_DELAY
+                        )
+                        logger.info(f"[{account.name}] Followed user {user_id}. Pausing {delay} seconds...")
+                        await asyncio.sleep(delay)
+
+            task.result = f"Followed {followed_count}/{num_follows} users"
+            logger.info(f"Mass follow completed: {followed_count}/{num_follows} follows")
+
+            return followed_count > 0
+
+        finally:
+            await client.close()
+
+    async def _execute_ai_comments(self, account: Account, task: Task) -> bool:
+        """
+        Execute AI comments task
+
+        Args:
+            account: Account to use
+            task: Task with parameters
+
+        Returns:
+            True if successful
+        """
+        params = task.parameters or {}
+        num_comments = params.get("num_comments", 5)
+        feed_type = params.get("feed_type", "all")
+
+        logger.info(f"AI comments task: {num_comments} comments on {feed_type} feed")
+
+        # Check daily limits
+        if not await self._check_daily_limit(account.id, "comment", num_comments):
+            raise ValueError("Daily comment limit exceeded")
+
+        # Create TenChat client
+        client = await self._create_client(account)
+
+        try:
+            # Check auth
+            if not await client.check_auth():
+                account.status = "cookies_expired"
+                await self.db.commit()
+                raise ValueError("Authentication failed - cookies expired")
+
+            # Get feed
+            posts = await client.get_feed(feed_type=feed_type, limit=num_comments * 2)
+            if not posts:
+                raise ValueError("Failed to fetch feed")
+
+            # Comment on posts with AI
+            commented_count = 0
+            for i, post in enumerate(posts[:num_comments]):
+                post_id = post.get("id") or post.get("post_id")
+                post_content = post.get("text") or post.get("content", "")
+
+                if not post_id or not post_content:
+                    continue
+
+                # Generate AI comment
+                comment_text = await self.ai_generator.generate_comment(post_content)
+                if not comment_text:
+                    logger.warning(f"Failed to generate comment for post {post_id}")
+                    continue
+
+                # Post comment
+                success = await client.comment_on_post(str(post_id), comment_text)
+
+                # Log action
+                action = Action(
+                    account_id=account.id,
+                    action_type="comment",
+                    target_id=str(post_id),
+                    success=success
+                )
+                self.db.add(action)
+
+                if success:
+                    commented_count += 1
+                    await self._increment_daily_stats(account.id, "comment")
+
+                    # Update task progress
+                    task.progress = int((i + 1) / num_comments * 100)
+                    await self.db.commit()
+
+                    # Human-like delay
+                    if i < num_comments - 1:
+                        delay = random.randint(
+                            settings.MIN_ACTION_DELAY,
+                            settings.MAX_ACTION_DELAY
+                        )
+                        logger.info(f"[{account.name}] Commented on post {post_id}. Pausing {delay} seconds...")
+                        await asyncio.sleep(delay)
+
+            task.result = f"Commented on {commented_count}/{num_comments} posts"
+            logger.info(f"AI comments completed: {commented_count}/{num_comments} comments")
+
+            return commented_count > 0
+
+        finally:
+            await client.close()
+
+    async def _execute_connections(self, account: Account, task: Task) -> bool:
+        """
+        Execute connection requests task
+
+        Args:
+            account: Account to use
+            task: Task with parameters
+
+        Returns:
+            True if successful
+        """
+        params = task.parameters or {}
+        search_query = params.get("search_query", "")
+        num_requests = params.get("num_requests", 10)
+
+        logger.info(f"Connections task: {num_requests} connection requests")
+
+        # Create TenChat client
+        client = await self._create_client(account)
+
+        try:
+            # Check auth
+            if not await client.check_auth():
+                account.status = "cookies_expired"
+                await self.db.commit()
+                raise ValueError("Authentication failed - cookies expired")
+
+            # Search users
+            users = await client.search_users(search_query, limit=num_requests * 2)
+            if not users:
+                raise ValueError("Failed to find users")
+
+            # Send connection requests
+            sent_count = 0
+            for i, user in enumerate(users[:num_requests]):
+                user_id = user.get("id") or user.get("user_id")
+                if not user_id:
+                    continue
+
+                # Send connection request
+                success = await client.send_connection_request(str(user_id))
+
+                # Log action
+                action = Action(
+                    account_id=account.id,
+                    action_type="connection",
+                    target_id=str(user_id),
+                    success=success
+                )
+                self.db.add(action)
+
+                if success:
+                    sent_count += 1
+
+                    # Update task progress
+                    task.progress = int((i + 1) / num_requests * 100)
+                    await self.db.commit()
+
+                    # Human-like delay
+                    if i < num_requests - 1:
+                        delay = random.randint(
+                            settings.MIN_ACTION_DELAY,
+                            settings.MAX_ACTION_DELAY
+                        )
+                        logger.info(f"[{account.name}] Sent connection request to {user_id}. Pausing {delay} seconds...")
+                        await asyncio.sleep(delay)
+
+            task.result = f"Sent {sent_count}/{num_requests} connection requests"
+            logger.info(f"Connections completed: {sent_count}/{num_requests} requests")
+
+            return sent_count > 0
+
+        finally:
+            await client.close()
+
+    async def _execute_dm_followers(self, account: Account, task: Task) -> bool:
+        """
+        Execute DM to followers task
+
+        Args:
+            account: Account to use
+            task: Task with parameters
+
+        Returns:
+            True if successful
+        """
+        params = task.parameters or {}
+        message_purpose = params.get("message_purpose", "networking")
+        num_messages = params.get("num_messages", 10)
+
+        logger.info(f"DM followers task: {num_messages} messages")
+
+        # Create TenChat client
+        client = await self._create_client(account)
+
+        try:
+            # Check auth
+            if not await client.check_auth():
+                account.status = "cookies_expired"
+                await self.db.commit()
+                raise ValueError("Authentication failed - cookies expired")
+
+            # Get followers
+            followers = await client.get_my_followers(limit=num_messages * 2)
+            if not followers:
+                raise ValueError("Failed to fetch followers")
+
+            # Send messages
+            sent_count = 0
+            for i, follower in enumerate(followers[:num_messages]):
+                user_id = follower.get("id") or follower.get("user_id")
+                user_name = follower.get("name", "")
+                user_position = follower.get("position", "")
+
+                if not user_id:
+                    continue
+
+                # Generate AI message
+                message_text = await self.ai_generator.generate_welcome_message(
+                    recipient_name=user_name,
+                    recipient_position=user_position
+                )
+                if not message_text:
+                    logger.warning(f"Failed to generate message for user {user_id}")
+                    continue
+
+                # Send message
+                success = await client.send_message(str(user_id), message_text)
+
+                # Log action
+                action = Action(
+                    account_id=account.id,
+                    action_type="message",
+                    target_id=str(user_id),
+                    success=success
+                )
+                self.db.add(action)
+
+                if success:
+                    sent_count += 1
+
+                    # Update task progress
+                    task.progress = int((i + 1) / num_messages * 100)
+                    await self.db.commit()
+
+                    # Human-like delay
+                    if i < num_messages - 1:
+                        delay = random.randint(
+                            settings.MIN_ACTION_DELAY * 2,
+                            settings.MAX_ACTION_DELAY * 2
+                        )
+                        logger.info(f"[{account.name}] Sent message to {user_id}. Pausing {delay} seconds...")
+                        await asyncio.sleep(delay)
+
+            task.result = f"Sent {sent_count}/{num_messages} messages"
+            logger.info(f"DM followers completed: {sent_count}/{num_messages} messages")
+
+            return sent_count > 0
+
+        finally:
+            await client.close()
+
+    async def _execute_dm_cold(self, account: Account, task: Task) -> bool:
+        """
+        Execute cold DM task
+
+        Args:
+            account: Account to use
+            task: Task with parameters
+
+        Returns:
+            True if successful
+        """
+        params = task.parameters or {}
+        search_query = params.get("search_query", "")
+        message_purpose = params.get("message_purpose", "networking")
+        num_messages = params.get("num_messages", 5)
+
+        logger.info(f"Cold DM task: {num_messages} messages for query '{search_query}'")
+
+        # Create TenChat client
+        client = await self._create_client(account)
+
+        try:
+            # Check auth
+            if not await client.check_auth():
+                account.status = "cookies_expired"
+                await self.db.commit()
+                raise ValueError("Authentication failed - cookies expired")
+
+            # Search users
+            users = await client.search_users(search_query, limit=num_messages * 2)
+            if not users:
+                raise ValueError("Failed to find users")
+
+            # Send messages
+            sent_count = 0
+            for i, user in enumerate(users[:num_messages]):
+                user_id = user.get("id") or user.get("user_id")
+                user_name = user.get("name", "")
+                user_position = user.get("position", "")
+
+                if not user_id:
+                    continue
+
+                # Generate AI message
+                message_text = await self.ai_generator.generate_dm_message(
+                    purpose=message_purpose,
+                    recipient_name=user_name,
+                    recipient_position=user_position
+                )
+                if not message_text:
+                    logger.warning(f"Failed to generate message for user {user_id}")
+                    continue
+
+                # Send message
+                success = await client.send_message(str(user_id), message_text)
+
+                # Log action
+                action = Action(
+                    account_id=account.id,
+                    action_type="message",
+                    target_id=str(user_id),
+                    success=success
+                )
+                self.db.add(action)
+
+                if success:
+                    sent_count += 1
+
+                    # Update task progress
+                    task.progress = int((i + 1) / num_messages * 100)
+                    await self.db.commit()
+
+                    # Human-like delay (longer for cold outreach)
+                    if i < num_messages - 1:
+                        delay = random.randint(
+                            settings.MIN_ACTION_DELAY * 3,
+                            settings.MAX_ACTION_DELAY * 3
+                        )
+                        logger.info(f"[{account.name}] Sent cold message to {user_id}. Pausing {delay} seconds...")
+                        await asyncio.sleep(delay)
+
+            task.result = f"Sent {sent_count}/{num_messages} cold messages"
+            logger.info(f"Cold DM completed: {sent_count}/{num_messages} messages")
+
+            return sent_count > 0
+
+        finally:
+            await client.close()
+
+    async def _execute_alliance_invites(self, account: Account, task: Task) -> bool:
+        """
+        Execute alliance invites task
+
+        Args:
+            account: Account to use
+            task: Task with parameters
+
+        Returns:
+            True if successful
+        """
+        params = task.parameters or {}
+        alliance_id = params.get("alliance_id", "")
+        search_query = params.get("search_query", "")
+        num_invites = params.get("num_invites", 10)
+
+        if not alliance_id:
+            raise ValueError("Alliance ID is required")
+
+        logger.info(f"Alliance invites task: {num_invites} invites to alliance {alliance_id}")
+
+        # Create TenChat client
+        client = await self._create_client(account)
+
+        try:
+            # Check auth
+            if not await client.check_auth():
+                account.status = "cookies_expired"
+                await self.db.commit()
+                raise ValueError("Authentication failed - cookies expired")
+
+            # Search users
+            users = await client.search_users(search_query, limit=num_invites * 2)
+            if not users:
+                raise ValueError("Failed to find users")
+
+            # Send invites
+            invited_count = 0
+            for i, user in enumerate(users[:num_invites]):
+                user_id = user.get("id") or user.get("user_id")
+                if not user_id:
+                    continue
+
+                # Invite to alliance
+                success = await client.invite_to_alliance(alliance_id, str(user_id))
+
+                # Log action
+                action = Action(
+                    account_id=account.id,
+                    action_type="alliance_invite",
+                    target_id=str(user_id),
+                    success=success
+                )
+                self.db.add(action)
+
+                if success:
+                    invited_count += 1
+
+                    # Update task progress
+                    task.progress = int((i + 1) / num_invites * 100)
+                    await self.db.commit()
+
+                    # Human-like delay
+                    if i < num_invites - 1:
+                        delay = random.randint(
+                            settings.MIN_ACTION_DELAY,
+                            settings.MAX_ACTION_DELAY
+                        )
+                        logger.info(f"[{account.name}] Invited user {user_id} to alliance. Pausing {delay} seconds...")
+                        await asyncio.sleep(delay)
+
+            task.result = f"Invited {invited_count}/{num_invites} users to alliance"
+            logger.info(f"Alliance invites completed: {invited_count}/{num_invites} invites")
+
+            return invited_count > 0
+
+        finally:
+            await client.close()
+
+    async def _execute_parse_users(self, account: Account, task: Task) -> bool:
+        """
+        Execute parse users task
+
+        Args:
+            account: Account to use
+            task: Task with parameters
+
+        Returns:
+            True if successful
+        """
+        params = task.parameters or {}
+        search_query = params.get("search_query", "")
+        num_users = params.get("num_users", 50)
+
+        logger.info(f"Parse users task: {num_users} users for query '{search_query}'")
+
+        # Create TenChat client
+        client = await self._create_client(account)
+
+        try:
+            # Check auth
+            if not await client.check_auth():
+                account.status = "cookies_expired"
+                await self.db.commit()
+                raise ValueError("Authentication failed - cookies expired")
+
+            # Search users
+            users = await client.search_users(search_query, limit=num_users)
+            if not users:
+                raise ValueError("Failed to find users")
+
+            # Collect user data
+            user_data = []
+            for i, user in enumerate(users):
+                user_id = user.get("id") or user.get("user_id")
+                if not user_id:
+                    continue
+
+                # Get full profile
+                profile = await client.get_user_profile(str(user_id))
+                if profile:
+                    user_data.append({
+                        "id": user_id,
+                        "name": profile.get("name", ""),
+                        "position": profile.get("position", ""),
+                        "company": profile.get("company", ""),
+                        "location": profile.get("location", "")
+                    })
+
+                # Update progress
+                task.progress = int((i + 1) / num_users * 100)
+                await self.db.commit()
+
+                # Small delay to avoid rate limiting
+                await asyncio.sleep(random.uniform(1, 3))
+
+            # Save to CSV or JSON (simplified - just store in task result)
+            import json
+            task.result = f"Parsed {len(user_data)} users: {json.dumps(user_data, ensure_ascii=False)[:500]}"
+            logger.info(f"Parse users completed: {len(user_data)} users parsed")
+
+            return len(user_data) > 0
+
+        finally:
+            await client.close()
+
+    async def _execute_auto_reply(self, account: Account, task: Task) -> bool:
+        """
+        Execute auto-reply task (monitors inbox and replies to new messages)
+
+        Args:
+            account: Account to use
+            task: Task with parameters
+
+        Returns:
+            True if successful
+        """
+        params = task.parameters or {}
+        check_interval = params.get("check_interval", 300)  # 5 minutes default
+
+        logger.info(f"Auto-reply task: monitoring inbox every {check_interval} seconds")
+
+        # Create TenChat client
+        client = await self._create_client(account)
+
+        try:
+            # Check auth
+            if not await client.check_auth():
+                account.status = "cookies_expired"
+                await self.db.commit()
+                raise ValueError("Authentication failed - cookies expired")
+
+            # Get unread messages
+            messages = await client.get_inbox(limit=20, unread_only=True)
+            if not messages:
+                task.result = "No unread messages"
+                return True
+
+            # Reply to messages
+            replied_count = 0
+            for i, message in enumerate(messages):
+                sender_id = message.get("sender_id") or message.get("from_user_id")
+                message_text = message.get("text") or message.get("content", "")
+
+                if not sender_id or not message_text:
+                    continue
+
+                # Generate AI reply
+                reply_text = await self.ai_generator.generate_auto_reply(
+                    incoming_message=message_text
+                )
+                if not reply_text:
+                    logger.warning(f"Failed to generate reply for message from {sender_id}")
+                    continue
+
+                # Send reply
+                success = await client.send_message(str(sender_id), reply_text)
+
+                # Log action
+                action = Action(
+                    account_id=account.id,
+                    action_type="auto_reply",
+                    target_id=str(sender_id),
+                    success=success
+                )
+                self.db.add(action)
+
+                if success:
+                    replied_count += 1
+
+                    # Update task progress
+                    task.progress = int((i + 1) / len(messages) * 100)
+                    await self.db.commit()
+
+                    # Small delay between replies
+                    await asyncio.sleep(random.randint(5, 15))
+
+            task.result = f"Replied to {replied_count}/{len(messages)} messages"
+            logger.info(f"Auto-reply completed: {replied_count}/{len(messages)} replies sent")
+
+            return replied_count > 0
+
+        finally:
+            await client.close()
