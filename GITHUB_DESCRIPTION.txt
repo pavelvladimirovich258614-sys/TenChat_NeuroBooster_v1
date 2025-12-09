@@ -1,0 +1,79 @@
+================================================================================
+ОПИСАНИЕ ДЛЯ GITHUB РЕПОЗИТОРИЯ (скопируйте в Settings → About)
+================================================================================
+
+Краткое описание (Description):
+-------------------------------
+🚀 TenChat NeuroBooster v1.1.0 | 10 функций автоматизации: AI постинг, масс-фолловинг, рассылки, автоответчик | FastAPI + Streamlit + AI | SOCKS5/HTTP proxy | Self-hosted | Production-ready
+
+
+Полное описание (для README или Website):
+------------------------------------------
+Self-hosted сервис для автоматизации продвижения в социальной сети TenChat.
+
+🎉 v1.1.0 - 10 функций продвижения:
+1. 🔥 Прогрев (лайкинг ленты)
+2. ✍️ AI Постинг статей
+3. ➕ Масс-фолловинг по аудитории
+4. 💬 AI Комментарии
+5. 🤝 Деловые связи (connections)
+6. 📩 Рассылка подписчикам
+7. 📨 Холодная рассылка (cold DM)
+8. 🛡 Приглашения в Альянс
+9. 🔍 Парсинг пользователей
+10. 🤖 Автоответчик на сообщения
+
+🎯 Ключевые возможности:
+• Multi-Account с Sidebar выбором
+• SOCKS5/HTTP Proxy Support
+• AI Content Generation (OpenAI/OpenRouter)
+• Human Emulation (60-180 сек задержки)
+• Safety Limits - защита от банов
+• Real-time Monitoring и логи
+
+🛠 Технологии:
+• Backend: FastAPI (async) + SQLAlchemy + SQLite
+• Frontend: Streamlit (3-tab UI)
+• HTTP Client: httpx (HTTP/2 support)
+• AI: OpenAI SDK (OpenRouter/OpenAI/local models)
+• Deploy: Docker Compose (one-command launch)
+
+🔒 Безопасность:
+• Cookies-based auth (EditThisCookie/J2TEAM)
+• User-Agent fingerprinting
+• Automatic limit enforcement
+• Error handling (401, 403, captcha detection)
+• Daily statistics tracking
+
+📦 Архитектура:
+• 11 Python модулей
+• Async task queue
+• Background worker
+• REST API + Web UI
+• SQLite database
+
+✅ Статус: Production-ready
+
+
+Topics (теги для GitHub):
+--------------------------
+tenchat automation fastapi streamlit python ai openai proxy multi-account
+social-media-automation mass-following auto-posting chatbot socks5 http2
+sqlalchemy docker async-python selfhosted marketing-automation ai-content
+
+
+Website (ссылка):
+----------------
+https://github.com/pavelvladimirovich258614-sys/TenChat_NeuroBooster_v1
+
+
+================================================================================
+ИНСТРУКЦИЯ:
+1. Откройте https://github.com/pavelvladimirovich258614-sys/TenChat_NeuroBooster_v1
+2. Нажмите на "⚙️" (Settings) справа
+3. В разделе "About":
+   - Description: вставьте краткое описание
+   - Website: вставьте ссылку на репозиторий
+   - Topics: добавьте теги (через пробел)
+4. Сохраните (Save changes)
+================================================================================
