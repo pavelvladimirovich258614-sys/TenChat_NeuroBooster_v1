@@ -7,8 +7,9 @@ streamlit==1.31.0
 sqlalchemy==2.0.25
 aiosqlite==0.19.0
 
-# HTTP Client (HTTP/2 Support)
+# HTTP Client (HTTP/2 Support + SOCKS)
 httpx[http2]==0.26.0
+httpx-socks==0.9.1
 
 # AI Integration
 openai==1.12.0

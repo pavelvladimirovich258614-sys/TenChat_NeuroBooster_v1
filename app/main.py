@@ -237,10 +237,27 @@ async def create_account(
         )
 
     except ValueError as e:
-        raise HTTPException(400, str(e))
+        logger.warning(f"Validation error: {e}")
+        raise HTTPException(400, f"Validation error: {str(e)}")
+    except RuntimeError as e:
+        logger.error(f"Runtime error: {e}")
+        raise HTTPException(500, f"Configuration error: {str(e)}")
+    except ConnectionError as e:
+        logger.error(f"Connection error: {e}")
+        raise HTTPException(500, f"Proxy connection failed: {str(e)}")
+    except TimeoutError as e:
+        logger.error(f"Timeout error: {e}")
+        raise HTTPException(500, f"Proxy connection timeout: {str(e)}")
     except Exception as e:
-        logger.error(f"Create account error: {e}")
-        raise HTTPException(500, "Internal server error")
+        logger.error(f"Create account error: {type(e).__name__}: {e}", exc_info=True)
+        # Return more specific error message
+        error_msg = str(e)
+        if "proxy" in error_msg.lower() or "socks" in error_msg.lower():
+            raise HTTPException(500, f"Proxy error: {error_msg}")
+        elif "connection" in error_msg.lower():
+            raise HTTPException(500, f"Connection error: {error_msg}")
+        else:
+            raise HTTPException(500, f"Internal server error: {error_msg}")
 
 
 @app.get("/accounts", response_model=List[AccountResponse])

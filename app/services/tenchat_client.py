@@ -6,6 +6,13 @@ import json
 from typing import Dict, List, Optional, Any
 from loguru import logger
 
+try:
+    from httpx_socks import AsyncProxyTransport
+    SOCKS_AVAILABLE = True
+except ImportError:
+    SOCKS_AVAILABLE = False
+    logger.warning("httpx-socks not installed, SOCKS5 proxies will not work")
+
 
 class TenChatClient:
     """HTTP/2 client for TenChat API"""
@@ -13,7 +20,7 @@ class TenChatClient:
     def __init__(
         self,
         cookies: Dict[str, str],
-        proxy: Dict[str, str],
+        proxy: Dict[str, Any],
         user_agent: str,
         base_url: str = "https://tenchat.ru"
     ):
@@ -22,7 +29,7 @@ class TenChatClient:
 
         Args:
             cookies: Dictionary with cookies
-            proxy: Dictionary with proxy configuration (httpx format)
+            proxy: Dictionary with proxy configuration (from ProxyHandler.get_httpx_proxy_config)
             user_agent: User-Agent string
             base_url: TenChat base URL
         """
@@ -31,13 +38,36 @@ class TenChatClient:
         self.user_agent = user_agent
 
         # Create httpx client with HTTP/2 support
-        self.client = httpx.AsyncClient(
-            http2=True,
-            proxies=proxy,
-            timeout=30.0,
-            follow_redirects=True,
-            verify=True
-        )
+        # Handle different proxy types
+        proxy_type = proxy.get("type", "http")
+
+        if proxy_type == "socks5":
+            if not SOCKS_AVAILABLE:
+                raise RuntimeError(
+                    "SOCKS5 proxy requested but httpx-socks is not installed. "
+                    "Install it with: pip install httpx-socks"
+                )
+
+            # Create SOCKS5 transport
+            transport = AsyncProxyTransport.from_url(
+                f"socks5://{proxy['username']}:{proxy['password']}@{proxy['host']}:{proxy['port']}"
+            )
+
+            self.client = httpx.AsyncClient(
+                transport=transport,
+                timeout=30.0,
+                follow_redirects=True,
+                verify=True
+            )
+        else:
+            # HTTP proxy (standard httpx)
+            self.client = httpx.AsyncClient(
+                http2=True,
+                proxies=proxy.get("url"),
+                timeout=30.0,
+                follow_redirects=True,
+                verify=True
+            )
 
     def _get_headers(self, extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         """
