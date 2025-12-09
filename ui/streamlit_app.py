@@ -1,6 +1,7 @@
 """
 Streamlit UI for TenChat NeuroBooster
 """
+import os
 import streamlit as st
 import requests
 import json
@@ -9,7 +10,8 @@ from datetime import datetime
 from typing import List, Dict
 
 # API Configuration
-API_URL = "http://localhost:8000"
+# В Docker используется имя сервиса 'tenchat_api', локально - localhost
+API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 
 def init_session_state():
