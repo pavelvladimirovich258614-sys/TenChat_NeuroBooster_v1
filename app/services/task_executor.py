@@ -201,27 +201,43 @@ class TaskExecutor:
             True if successful
         """
         params = task.parameters or {}
-        topic = params.get("topic", "")
-        style = params.get("style", "professional")
 
-        if not topic:
+        # Support both old format (single topic) and new format (topics array)
+        topics = params.get("topics", [])
+        if not topics:
+            # Fallback to old format
+            single_topic = params.get("topic", "")
+            if single_topic:
+                topics = [single_topic]
+
+        style = params.get("style", "professional")
+        mood = params.get("mood", "expert")
+
+        if not topics:
             raise ValueError("Topic is required for AI post task")
 
-        logger.info(f"AI post task: {topic}")
+        # Use first topic (UI creates separate tasks for each topic)
+        topic = topics[0] if isinstance(topics, list) else topics
+
+        logger.info(f"AI post task: {topic} (style: {style}, mood: {mood})")
 
         # Check daily limits
         if not await self._check_daily_limit(account.id, "post", 1):
             raise ValueError("Daily post limit exceeded")
 
-        # Generate article
+        # Generate article with mood
         task.progress = 20
         await self.db.commit()
 
-        article = await self.ai_generator.generate_article(topic, style)
+        article = await self.ai_generator.generate_article(
+            topic=topic,
+            style=style,
+            mood=mood
+        )
         if not article:
             raise ValueError("Failed to generate article")
 
-        logger.info(f"Generated article: {article['title']}")
+        logger.info(f"Generated article ({mood} mood): {article['title']}")
 
         # Create TenChat client
         client = await self._create_client(account)
@@ -257,10 +273,10 @@ class TaskExecutor:
             await self._increment_daily_stats(account.id, "post")
 
             task.progress = 100
-            task.result = f"Posted article: {post_id}"
+            task.result = f"Posted article ({mood}): {post_id}"
             await self.db.commit()
 
-            logger.info(f"AI post completed: {post_id}")
+            logger.info(f"AI post completed ({mood} mood): {post_id}")
             return True
 
         finally:
