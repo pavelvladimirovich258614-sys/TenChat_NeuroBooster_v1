@@ -1,0 +1,33 @@
+# Core Framework
+fastapi==0.109.0
+uvicorn[standard]==0.27.0
+streamlit==1.31.0
+
+# Database
+sqlalchemy==2.0.25
+aiosqlite==0.19.0
+
+# HTTP Client (HTTP/2 Support)
+httpx[http2]==0.26.0
+
+# AI Integration
+openai==1.12.0
+
+# Utilities
+python-dotenv==1.0.1
+python-multipart==0.0.9
+pydantic==2.6.0
+pydantic-settings==2.1.0
+
+# Task Scheduling
+apscheduler==3.10.4
+
+# Data Processing
+Pillow==10.2.0
+
+# Logging
+loguru==0.7.2
+
+# Utils
+python-json-logger==2.0.7
+fake-useragent==1.4.0

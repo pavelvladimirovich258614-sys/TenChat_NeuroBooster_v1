@@ -1,0 +1,28 @@
+[
+  {
+    "domain": ".tenchat.ru",
+    "expirationDate": 1735689600,
+    "hostOnly": false,
+    "httpOnly": false,
+    "name": "sessionid",
+    "path": "/",
+    "sameSite": "no_restriction",
+    "secure": true,
+    "session": false,
+    "storeId": null,
+    "value": "your_session_id_here"
+  },
+  {
+    "domain": ".tenchat.ru",
+    "expirationDate": 1735689600,
+    "hostOnly": false,
+    "httpOnly": false,
+    "name": "csrftoken",
+    "path": "/",
+    "sameSite": "lax",
+    "secure": true,
+    "session": false,
+    "storeId": null,
+    "value": "your_csrf_token_here"
+  }
+]
