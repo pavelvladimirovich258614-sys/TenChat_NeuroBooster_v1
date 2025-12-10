@@ -1,7 +1,11 @@
 """
 Cookies parser for TenChat authentication
 """
+# STARTUP VERIFICATION
+print("[STARTUP] cookies_parser.py LOADED - VERSION 2025-12-10-v4 (FULL DEBUG)")
+
 import json
+import traceback
 from typing import Dict, List, Any
 from loguru import logger
 
@@ -13,40 +17,133 @@ class CookiesParser:
     def parse_json(cookies_json: str) -> Dict[str, str]:
         """
         Parse cookies from JSON string to dictionary format
-
-        Args:
-            cookies_json: JSON string with cookies
-
-        Returns:
-            Dictionary with cookie name-value pairs
-
-        Raises:
-            ValueError: If JSON is invalid or format is incorrect
         """
         try:
+            return CookiesParser._parse_json_internal(cookies_json)
+        except Exception as e:
+            logger.error(f"[COOKIES_PARSER] EXCEPTION: {type(e).__name__}: {e}")
+            logger.error(f"[COOKIES_PARSER] TRACEBACK:\n{traceback.format_exc()}")
+            raise
+
+    @staticmethod
+    def _parse_json_internal(cookies_json: str) -> Dict[str, str]:
+        """Internal parsing with full error handling"""
+        
+        # Validate input
+        if cookies_json is None:
+            raise ValueError("Cookies JSON is None")
+        
+        logger.error(f"[COOKIES_PARSER] START - input type: {type(cookies_json).__name__}")
+        
+        # Ensure we have a string
+        if isinstance(cookies_json, bytes):
+            cookies_json = cookies_json.lstrip(b'\xef\xbb\xbf')
+            cookies_json = cookies_json.decode('utf-8')
+        
+        # Strip BOM and whitespace
+        cookies_json = cookies_json.lstrip('\ufeff').strip()
+        
+        if not cookies_json:
+            raise ValueError("Cookies JSON is empty")
+        
+        logger.error(f"[COOKIES_PARSER] Input length: {len(cookies_json)}")
+        logger.error(f"[COOKIES_PARSER] First 300 chars: {repr(cookies_json[:300])}")
+        
+        # Parse JSON
+        try:
             cookies_data = json.loads(cookies_json)
+            logger.error(f"[COOKIES_PARSER] json.loads OK - type: {type(cookies_data).__name__}")
         except json.JSONDecodeError as e:
+            logger.error(f"[COOKIES_PARSER] json.loads FAILED: {e}")
             raise ValueError(f"Invalid JSON format: {e}")
-
+        
+        # Handle multiple encodings
+        parse_attempts = 0
+        while isinstance(cookies_data, str) and parse_attempts < 3:
+            parse_attempts += 1
+            logger.error(f"[COOKIES_PARSER] Decoding attempt {parse_attempts} (got string)")
+            try:
+                cookies_data = json.loads(cookies_data)
+            except json.JSONDecodeError as e:
+                raise ValueError(f"Multi-encoded JSON parse failed at attempt {parse_attempts}: {e}")
+        
+        logger.error(f"[COOKIES_PARSER] After decode loops - type: {type(cookies_data).__name__}")
+        
+        # Handle dict wrapper
+        if isinstance(cookies_data, dict):
+            logger.error(f"[COOKIES_PARSER] Got dict with keys: {list(cookies_data.keys())[:10]}")
+            for key in ["cookies", "data", "items", "result"]:
+                if key in cookies_data:
+                    cookies_data = cookies_data[key]
+                    logger.error(f"[COOKIES_PARSER] Extracted from '{key}' wrapper")
+                    break
+            else:
+                if cookies_data and all(str(k).isdigit() for k in cookies_data.keys()):
+                    cookies_data = list(cookies_data.values())
+                    logger.error(f"[COOKIES_PARSER] Converted numeric-key dict to list")
+                else:
+                    # Maybe it's a single cookie dict?
+                    if "name" in cookies_data and "value" in cookies_data:
+                        cookies_data = [cookies_data]
+                        logger.error(f"[COOKIES_PARSER] Wrapped single cookie in list")
+                    else:
+                        raise ValueError(f"Cookies must be array, got dict with keys: {list(cookies_data.keys())[:5]}")
+        
         if not isinstance(cookies_data, list):
-            raise ValueError("Cookies JSON must be an array")
-
+            raise ValueError(f"Cookies must be array, got {type(cookies_data).__name__}")
+        
+        logger.error(f"[COOKIES_PARSER] Processing {len(cookies_data)} entries")
+        
+        # Log first few elements for debugging
+        for idx, elem in enumerate(cookies_data[:3]):
+            logger.error(f"[COOKIES_PARSER] Element[{idx}] type={type(elem).__name__}, value={repr(str(elem)[:100])}")
+        
         cookies_dict = {}
-
-        for cookie in cookies_data:
-            if not isinstance(cookie, dict):
+        skipped = 0
+        
+        for i, cookie in enumerate(cookies_data):
+            try:
+                # If string, try to parse as JSON
+                if isinstance(cookie, str):
+                    cookie = cookie.strip()
+                    if cookie.startswith('{'):
+                        try:
+                            cookie = json.loads(cookie)
+                            logger.error(f"[COOKIES_PARSER] Parsed string entry {i} as JSON object")
+                        except json.JSONDecodeError as e:
+                            logger.error(f"[COOKIES_PARSER] Entry {i} string parse failed: {e}")
+                            skipped += 1
+                            continue
+                    else:
+                        logger.error(f"[COOKIES_PARSER] Entry {i} is non-JSON string: {repr(cookie[:50])}")
+                        skipped += 1
+                        continue
+                
+                if not isinstance(cookie, dict):
+                    logger.error(f"[COOKIES_PARSER] Entry {i} not dict: {type(cookie).__name__}")
+                    skipped += 1
+                    continue
+                
+                # Safely get name and value
+                name = cookie.get("name") if hasattr(cookie, 'get') else None
+                value = cookie.get("value") if hasattr(cookie, 'get') else None
+                
+                if name and value:
+                    cookies_dict[str(name)] = str(value)
+                else:
+                    logger.error(f"[COOKIES_PARSER] Entry {i} missing name/value: keys={list(cookie.keys()) if hasattr(cookie, 'keys') else 'N/A'}")
+                    
+            except Exception as e:
+                logger.error(f"[COOKIES_PARSER] Entry {i} exception: {type(e).__name__}: {e}")
+                skipped += 1
                 continue
-
-            name = cookie.get("name")
-            value = cookie.get("value")
-
-            if name and value:
-                cookies_dict[name] = value
-
+        
+        logger.error(f"[COOKIES_PARSER] DONE: {len(cookies_dict)} cookies, {skipped} skipped")
+        
         if not cookies_dict:
-            raise ValueError("No valid cookies found in JSON")
-
-        logger.debug(f"Parsed {len(cookies_dict)} cookies: {list(cookies_dict.keys())}")
+            raise ValueError(f"No valid cookies found. Total entries: {len(cookies_data)}, skipped: {skipped}")
+        
+        logger.error(f"[COOKIES_PARSER] Cookie names: {list(cookies_dict.keys())}")
         return cookies_dict
 
     @staticmethod

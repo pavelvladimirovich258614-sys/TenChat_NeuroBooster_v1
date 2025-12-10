@@ -1,5 +1,3 @@
-version: '3.8'
-
 # ============================================
 # TenChat NeuroBooster Docker Compose v1.2.1
 # ============================================
@@ -18,9 +16,13 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./.env:/app/.env:ro
+      # Source code volumes (removed :ro for compatibility)
+      - ./app:/app/app
+      - ./ui:/app/ui
     environment:
       - DATABASE_URL=sqlite+aiosqlite:///./data/tenchat_booster.db
       - PYTHONUNBUFFERED=1
+      - PYTHONDONTWRITEBYTECODE=1
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:8000/"]
@@ -58,6 +60,9 @@ services:
       - ./data:/app/data
       - ./logs:/app/logs
       - ./.env:/app/.env:ro
+      # Source code volumes (removed :ro for compatibility)
+      - ./app:/app/app
+      - ./ui:/app/ui
     depends_on:
       api:
         condition: service_healthy

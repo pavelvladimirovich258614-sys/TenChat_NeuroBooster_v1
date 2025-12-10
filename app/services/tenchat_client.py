@@ -115,16 +115,13 @@ class TenChatClient:
     ):
         """
         Initialize TenChat client with enhanced safety features
-
-        Args:
-            cookies: Dictionary with cookies
-            proxy: Dictionary with proxy configuration
-            user_agent: User-Agent string
-            base_url: TenChat base URL
-            max_retries: Maximum retry attempts
-            circuit_breaker_threshold: Failures before circuit opens
-            circuit_breaker_reset_time: Seconds before circuit breaker resets
         """
+        logger.error(f"[TenChatClient.__init__] START")
+        logger.error(f"[TenChatClient.__init__] cookies type: {type(cookies)}")
+        logger.error(f"[TenChatClient.__init__] cookies keys: {list(cookies.keys()) if hasattr(cookies, 'keys') else 'N/A'}")
+        logger.error(f"[TenChatClient.__init__] proxy type: {type(proxy)}")
+        logger.error(f"[TenChatClient.__init__] proxy: {proxy}")
+        
         self.base_url = base_url
         self.cookies = cookies
         self.user_agent = user_agent
@@ -147,11 +144,17 @@ class TenChatClient:
         self._proxy_config = proxy
         
         # Create client
+        logger.error(f"[TenChatClient.__init__] Calling _create_client...")
         self.client = self._create_client(proxy)
+        logger.error(f"[TenChatClient.__init__] DONE")
 
     def _create_client(self, proxy: Dict[str, Any]) -> httpx.AsyncClient:
         """Create httpx client with appropriate proxy configuration"""
+        logger.error(f"[_create_client] START - proxy: {proxy}")
+        
         proxy_type = proxy.get("type", "http")
+        logger.error(f"[_create_client] proxy_type: {proxy_type}")
+        
         timeout = httpx.Timeout(30.0, connect=10.0)
 
         if proxy_type == "socks5":
@@ -161,38 +164,48 @@ class TenChatClient:
                     "Install it with: pip install httpx-socks"
                 )
 
-            # Create SOCKS5 transport with HTTP/2 support
-            transport = AsyncProxyTransport.from_url(
-                f"socks5://{proxy['username']}:{proxy['password']}@{proxy['host']}:{proxy['port']}",
-                http2=True
-            )
+            # Build proxy URL safely
+            proxy_host = proxy.get('host', '')
+            proxy_port = proxy.get('port', '')
+            proxy_user = proxy.get('username', '')
+            proxy_pass = proxy.get('password', '')
+            
+            logger.error(f"[_create_client] SOCKS5 - host:{proxy_host}, port:{proxy_port}, user:{proxy_user[:3]}***")
+            
+            proxy_url = f"socks5://{proxy_user}:{proxy_pass}@{proxy_host}:{proxy_port}"
+            logger.error(f"[_create_client] Creating AsyncProxyTransport...")
+            
+            transport = AsyncProxyTransport.from_url(proxy_url, http2=True)
+            logger.error(f"[_create_client] Transport created, creating AsyncClient...")
 
-            return httpx.AsyncClient(
+            client = httpx.AsyncClient(
                 transport=transport,
                 timeout=timeout,
                 follow_redirects=True,
                 verify=True
             )
+            logger.error(f"[_create_client] SOCKS5 client DONE")
+            return client
         else:
             # HTTP proxy (standard httpx)
-            return httpx.AsyncClient(
+            logger.error(f"[_create_client] HTTP proxy - url: {proxy.get('url')}")
+            client = httpx.AsyncClient(
                 http2=True,
                 proxies=proxy.get("url"),
                 timeout=timeout,
                 follow_redirects=True,
                 verify=True
             )
+            logger.error(f"[_create_client] HTTP client DONE")
+            return client
 
     def _get_headers(self, extra_headers: Optional[Dict[str, str]] = None) -> Dict[str, str]:
         """
         Get default headers for requests with browser-like fingerprint
-
-        Args:
-            extra_headers: Additional headers to include
-
-        Returns:
-            Dictionary with headers
         """
+        logger.error(f"[_get_headers] START")
+        logger.error(f"[_get_headers] cookies type: {type(self.cookies)}")
+        
         headers = {
             "User-Agent": self.user_agent,
             "Accept": "application/json, text/plain, */*",
@@ -213,17 +226,25 @@ class TenChatClient:
         }
 
         # Add CSRF token if available (case-insensitive search)
-        for key, value in self.cookies.items():
-            key_lower = key.lower()
-            if key_lower == "csrftoken":
-                headers["X-CSRFToken"] = value
-            elif key_lower == "x-xsrf-token":
-                headers["X-XSRF-TOKEN"] = value
+        logger.error(f"[_get_headers] Iterating over cookies...")
+        try:
+            if hasattr(self.cookies, 'items'):
+                for key, value in self.cookies.items():
+                    key_lower = str(key).lower()
+                    if key_lower == "csrftoken":
+                        headers["X-CSRFToken"] = str(value)
+                    elif key_lower == "x-xsrf-token":
+                        headers["X-XSRF-TOKEN"] = str(value)
+            else:
+                logger.error(f"[_get_headers] WARNING: cookies has no items() method!")
+        except Exception as e:
+            logger.error(f"[_get_headers] Error iterating cookies: {type(e).__name__}: {e}")
 
         # Merge extra headers
         if extra_headers:
             headers.update(extra_headers)
 
+        logger.error(f"[_get_headers] DONE - returning {len(headers)} headers")
         return headers
 
     async def _execute_with_retry(
@@ -375,12 +396,15 @@ class TenChatClient:
     async def check_auth(self) -> bool:
         """
         Check if authentication is valid
-
-        Returns:
-            True if authenticated, False otherwise
         """
+        logger.error("[check_auth] START")
+        logger.error(f"[check_auth] self.cookies type: {type(self.cookies)}")
+        logger.error(f"[check_auth] self.cookies keys: {list(self.cookies.keys()) if hasattr(self.cookies, 'keys') else 'NOT A DICT!'}")
+        
         try:
+            logger.error("[check_auth] Calling _execute_with_retry...")
             response = await self._execute_with_retry("GET", "/api/v1/profile/me")
+            logger.error(f"[check_auth] Response status: {response.status_code}")
             if response.status_code == 200:
                 logger.info("Authentication check: SUCCESS")
                 return True
@@ -392,7 +416,9 @@ class TenChatClient:
             logger.warning("Authentication check: CAPTCHA required")
             return False
         except Exception as e:
-            logger.error(f"Authentication check failed: {e}")
+            logger.error(f"[check_auth] EXCEPTION: {type(e).__name__}: {e}")
+            import traceback
+            logger.error(f"[check_auth] Traceback:\n{traceback.format_exc()}")
             return False
 
     async def get_feed(

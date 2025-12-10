@@ -1,6 +1,11 @@
 """
 FastAPI Backend for TenChat NeuroBooster with Enhanced Reliability
 """
+# STARTUP VERIFICATION - This MUST print when module loads
+print("=" * 70)
+print("[STARTUP] main.py LOADED - VERSION 2025-12-10-v4 (STEP BY STEP DEBUG)")
+print("=" * 70)
+
 import asyncio
 import signal
 import sys
@@ -257,19 +262,38 @@ async def create_account(
     db: AsyncSession = Depends(get_db)
 ):
     """Create new account"""
+    import traceback
+    
     try:
-        # Validate cookies
+        logger.error("=" * 60)
+        logger.error("[STEP 1] create_account CALLED")
+        logger.error(f"[STEP 1] cookies_json type: {type(account.cookies_json)}, len: {len(account.cookies_json) if account.cookies_json else 0}")
+        logger.error(f"[STEP 1] proxy: {account.proxy}")
+        logger.error("=" * 60)
+        
+        # Step 2: Parse cookies
+        logger.error("[STEP 2] Calling CookiesParser.parse_json()...")
         cookies = CookiesParser.parse_json(account.cookies_json)
+        logger.error(f"[STEP 2] DONE - got {len(cookies)} cookies: {list(cookies.keys())}")
+        
+        # Step 3: Validate cookies
+        logger.error("[STEP 3] Calling CookiesParser.validate_cookies()...")
         if not CookiesParser.validate_cookies(cookies):
-            raise HTTPException(400, "Invalid cookies")
+            raise HTTPException(400, "Invalid cookies - missing required auth cookies")
+        logger.error("[STEP 3] DONE - cookies valid")
 
-        # Validate proxy
+        # Step 4: Parse proxy
+        logger.error(f"[STEP 4] Calling ProxyHandler.get_httpx_proxy_config({account.proxy})...")
         proxy_config = ProxyHandler.get_httpx_proxy_config(account.proxy)
+        logger.error(f"[STEP 4] DONE - proxy config: {proxy_config}")
 
-        # Generate User-Agent
+        # Step 5: Generate User-Agent
+        logger.error("[STEP 5] Generating User-Agent...")
         user_agent = UserAgentGenerator.generate_random()
+        logger.error(f"[STEP 5] DONE - UA: {user_agent[:50]}...")
 
-        # Create account
+        # Step 6: Create account in DB
+        logger.error("[STEP 6] Creating Account object...")
         new_account = Account(
             name=account.name,
             cookies_json=account.cookies_json,
@@ -277,21 +301,36 @@ async def create_account(
             user_agent=user_agent,
             status="active"
         )
+        logger.error("[STEP 6] DONE - Account object created")
 
+        # Step 7: Save to DB
+        logger.error("[STEP 7] Saving to database...")
         db.add(new_account)
         await db.commit()
         await db.refresh(new_account)
+        logger.error(f"[STEP 7] DONE - Account ID: {new_account.id}")
 
-        # Check authentication
+        # Step 8: Create TenChatClient
+        logger.error("[STEP 8] Creating TenChatClient...")
+        logger.error(f"[STEP 8] cookies type: {type(cookies)}, keys: {list(cookies.keys())}")
+        logger.error(f"[STEP 8] proxy_config type: {type(proxy_config)}")
         client = TenChatClient(cookies, proxy_config, user_agent)
+        logger.error("[STEP 8] DONE - TenChatClient created")
+        
+        # Step 9: Check auth
+        logger.error("[STEP 9] Checking authentication...")
         try:
             auth_ok = await client.check_auth()
+            logger.error(f"[STEP 9] DONE - auth_ok: {auth_ok}")
             if not auth_ok:
                 new_account.status = "cookies_expired"
                 await db.commit()
+                logger.error("[STEP 9] Updated status to cookies_expired")
         finally:
             await client.close()
 
+        # Step 10: Return response
+        logger.error("[STEP 10] Returning AccountResponse...")
         return AccountResponse(
             id=new_account.id,
             name=new_account.name,
@@ -302,20 +341,18 @@ async def create_account(
         )
 
     except ValueError as e:
-        logger.warning(f"Validation error: {e}")
+        logger.error(f"[ERROR] ValueError: {e}")
+        logger.error(f"[ERROR] Traceback:\n{traceback.format_exc()}")
         raise HTTPException(400, f"Validation error: {str(e)}")
     except RuntimeError as e:
-        logger.error(f"Runtime error: {e}")
+        logger.error(f"[ERROR] RuntimeError: {e}")
+        logger.error(f"[ERROR] Traceback:\n{traceback.format_exc()}")
         raise HTTPException(500, f"Configuration error: {str(e)}")
-    except ConnectionError as e:
-        logger.error(f"Connection error: {e}")
-        raise HTTPException(500, f"Proxy connection failed: {str(e)}")
-    except TimeoutError as e:
-        logger.error(f"Timeout error: {e}")
-        raise HTTPException(500, f"Proxy connection timeout: {str(e)}")
+    except HTTPException:
+        raise
     except Exception as e:
-        logger.error(f"Create account error: {type(e).__name__}: {e}", exc_info=True)
-        # Return more specific error message
+        logger.error(f"[ERROR] {type(e).__name__}: {e}")
+        logger.error(f"[ERROR] Full Traceback:\n{traceback.format_exc()}")
         error_msg = str(e)
         if "proxy" in error_msg.lower() or "socks" in error_msg.lower():
             raise HTTPException(500, f"Proxy error: {error_msg}")

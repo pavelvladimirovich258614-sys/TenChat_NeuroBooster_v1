@@ -48,9 +48,12 @@ RUN pip install --no-cache-dir /wheels/* \
 RUN useradd --create-home --shell /bin/bash appuser
 
 # Copy application code
-COPY app/ ./app/
+# NOTE: app/ and ui/ are mounted as volumes in docker-compose.yml for development
+# Only copy config/ which rarely changes
 COPY config/ ./config/
-COPY ui/ ./ui/
+
+# Create empty directories for volume mounts (will be overwritten)
+RUN mkdir -p ./app ./ui
 
 # Create directories and set permissions
 RUN mkdir -p /app/data /app/logs \

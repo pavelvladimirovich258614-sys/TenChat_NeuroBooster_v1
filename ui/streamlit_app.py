@@ -29,8 +29,22 @@ def api_request(method: str, endpoint: str, **kwargs):
         response = requests.request(method, url, **kwargs)
         response.raise_for_status()
         return response.json()
+    except requests.exceptions.HTTPError as e:
+        # Try to get detailed error message from response
+        error_detail = ""
+        try:
+            error_data = e.response.json()
+            if isinstance(error_data, dict):
+                error_detail = error_data.get("detail", str(error_data))
+        except:
+            error_detail = e.response.text[:500] if e.response.text else ""
+        
+        st.error(f"Ошибка API: {e.response.status_code}")
+        if error_detail:
+            st.error(f"Детали: {error_detail}")
+        return None
     except requests.exceptions.RequestException as e:
-        st.error(f"API Error: {e}")
+        st.error(f"Ошибка подключения: {e}")
         return None
 
 
@@ -135,7 +149,27 @@ def render_accounts_tab():
                 else:
                     # Read cookies
                     try:
-                        cookies_json = cookies_file.read().decode("utf-8")
+                        # Read raw bytes and handle BOM
+                        raw_bytes = cookies_file.read()
+                        
+                        # Strip UTF-8 BOM if present
+                        if raw_bytes.startswith(b'\xef\xbb\xbf'):
+                            raw_bytes = raw_bytes[3:]
+                        
+                        # Decode to string
+                        cookies_json = raw_bytes.decode("utf-8")
+                        
+                        # Strip Unicode BOM if present after decode
+                        cookies_json = cookies_json.lstrip('\ufeff')
+                        
+                        # Validate JSON before sending
+                        try:
+                            parsed = json.loads(cookies_json)
+                            if not isinstance(parsed, list):
+                                st.warning("⚠️ Файл cookies должен содержать массив [...], не объект {...}")
+                        except json.JSONDecodeError as je:
+                            st.error(f"Некорректный JSON в файле cookies: {je}")
+                            st.stop()
 
                         # Create account
                         response = api_request(
@@ -153,6 +187,8 @@ def render_accounts_tab():
                             st.session_state.refresh_counter += 1
                             st.rerun()
 
+                    except UnicodeDecodeError as e:
+                        st.error(f"Ошибка кодировки файла. Убедитесь, что файл в UTF-8: {e}")
                     except Exception as e:
                         st.error(f"Ошибка при чтении cookies: {e}")
 
