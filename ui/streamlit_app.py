@@ -55,33 +55,41 @@ def render_sidebar():
 
         # Get all accounts
         accounts = api_request("GET", "/accounts")
+        
+        # Ensure accounts is a list
+        if accounts is None:
+            accounts = []
 
-        if accounts and len(accounts) > 0:
+        if len(accounts) > 0:
             st.subheader("Активный Аккаунт")
 
-            # Account selector
-            account_options = {acc["id"]: f"{acc['name']} ({acc['status']})" for acc in accounts}
+            # Build options: 0 = "Все аккаунты", then account IDs
+            options_list = [0] + [acc["id"] for acc in accounts]
+            options_labels = {0: "Все аккаунты"}
+            for acc in accounts:
+                options_labels[acc["id"]] = f"{acc['name']} ({acc['status']})"
 
-            # Add "All accounts" option
-            account_options[0] = "Все аккаунты"
-
-            # Default to first account if nothing selected
-            if st.session_state.selected_account_id is None:
+            # Validate selected_account_id exists in options
+            if st.session_state.selected_account_id not in options_list:
+                st.session_state.selected_account_id = 0
+            
+            # Find current index safely
+            try:
+                current_index = options_list.index(st.session_state.selected_account_id)
+            except ValueError:
+                current_index = 0
                 st.session_state.selected_account_id = 0
 
             selected_id = st.selectbox(
                 "Выберите аккаунт:",
-                options=list(account_options.keys()),
-                format_func=lambda x: account_options[x],
-                index=0 if st.session_state.selected_account_id == 0 else
-                      list(account_options.keys()).index(st.session_state.selected_account_id),
+                options=options_list,
+                format_func=lambda x: options_labels.get(x, f"Аккаунт {x}"),
+                index=current_index,
                 key="account_selector"
             )
 
-            # Update session state
-            if selected_id != st.session_state.selected_account_id:
-                st.session_state.selected_account_id = selected_id
-                st.rerun()
+            # Update session state (without rerun to avoid loops)
+            st.session_state.selected_account_id = selected_id
 
             # Show selected account info
             if selected_id != 0:
@@ -94,22 +102,26 @@ def render_sidebar():
         else:
             st.warning("⚠️ Нет добавленных аккаунтов")
             st.info("Перейдите во вкладку 'Аккаунты' для добавления")
+            st.session_state.selected_account_id = None
 
         st.divider()
 
         # Quick stats
         st.subheader("📈 Быстрая статистика")
 
-        if accounts:
+        if accounts and len(accounts) > 0:
             active_count = sum(1 for acc in accounts if acc["status"] == "active")
             st.metric("Активных аккаунтов", f"{active_count}/{len(accounts)}")
 
         # Recent actions count
         actions = api_request("GET", "/actions?limit=1000")
-        if actions:
-            today_actions = sum(1 for a in actions
-                              if datetime.fromisoformat(a["created_at"]).date() == datetime.now().date())
-            st.metric("Действий сегодня", today_actions)
+        if actions and len(actions) > 0:
+            try:
+                today_actions = sum(1 for a in actions
+                                  if datetime.fromisoformat(a["created_at"].replace("Z", "")).date() == datetime.now().date())
+                st.metric("Действий сегодня", today_actions)
+            except Exception:
+                st.metric("Действий сегодня", len(actions))
 
 
 def render_accounts_tab():
@@ -931,12 +943,11 @@ def render_tasks_tab():
 
         st.dataframe(styled_df, use_container_width=True, hide_index=True)
 
-        # Auto-refresh for running tasks
+        # Show refresh button for running tasks instead of auto-refresh (avoids React loop)
         if any(task["status"] == "running" for task in tasks):
-            st.info("⏳ Задачи выполняются... Страница обновится автоматически")
-            import time
-            time.sleep(5)
-            st.rerun()
+            st.info("⏳ Задачи выполняются...")
+            if st.button("🔄 Обновить статус задач"):
+                st.rerun()
 
     else:
         st.info("Нет задач")
@@ -978,13 +989,20 @@ def render_logs_tab():
                 "comment": "💬 Комментарий"
             }
 
+            # Parse datetime safely
+            try:
+                created_at = action["created_at"].replace("Z", "").replace("T", " ")[:19]
+                time_str = created_at
+            except Exception:
+                time_str = str(action.get("created_at", "-"))
+            
             df_data.append({
                 "Аккаунт": acc_name,
                 "Действие": action_type_map.get(action["action_type"], action["action_type"]),
                 "Цель": action["target_id"] or "-",
                 "Успех": "✅" if action["success"] else "❌",
                 "Ошибка": action["error_message"] or "-",
-                "Время": datetime.fromisoformat(action["created_at"]).strftime("%Y-%m-%d %H:%M:%S")
+                "Время": time_str
             })
 
         df = pd.DataFrame(df_data)
